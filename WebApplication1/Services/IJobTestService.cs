@@ -6,5 +6,9 @@
         void ReccuringJob();
         void DelayedJob();
         void ContinuationJob();
+
+        Task SendWelcomeEmailAsync(string email, string name);
+        Task ProcessOrderAsync(int orderId);
+        Task GenerateReportAsync(string reportType);
     }
 }

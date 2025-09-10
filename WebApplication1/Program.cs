@@ -1,8 +1,11 @@
 
 using Hangfire;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity.UI.Services;
+using Microsoft.IdentityModel.Tokens;
 using Scalar.AspNetCore;
 using Serilog;
+using System.Security.Claims;
 using WebApplication1.Services;
 using ZiggyCreatures.Caching.Fusion;
 using ZiggyCreatures.Caching.Fusion.Serialization.SystemTextJson;
@@ -14,6 +17,79 @@ namespace WebApplication1
         public static void Main(string[] args)
         {
             var builder = WebApplication.CreateBuilder(args);
+
+            // Serilog config
+            Log.Logger = new LoggerConfiguration()
+                .ReadFrom.Configuration(builder.Configuration)
+                .Enrich.FromLogContext()
+                .Enrich.WithProperty("Application", "Webapplication1")
+                .WriteTo.Console()
+                .WriteTo.File("logs/log-.txt", rollingInterval: RollingInterval.Day)
+                .CreateLogger();
+
+            builder.Host.UseSerilog();
+
+            //ADSF Jwt
+
+            //builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            //    .AddJwtBearer(options =>
+            //    {
+            //        var adsfConfig = builder.Configuration.GetSection("ADSF");
+
+            //        options.Authority = adsfConfig["Authority"];
+            //        options.Audience = adsfConfig["Audience"];
+            //        options.RequireHttpsMetadata = true;
+
+            //        options.TokenValidationParameters = new TokenValidationParameters
+            //        {
+            //            ValidateIssuer = true,
+            //            ValidIssuer = adsfConfig["Issuer"],
+
+            //            ValidateAudience = true,
+            //            ValidAudience = adsfConfig["Audience"],
+
+            //            ValidateLifetime = true,
+            //            ClockSkew = TimeSpan.FromMinutes(5),
+
+            //            ValidateIssuerSigningKey = true,
+
+            //            NameClaimType = ClaimTypes.Name,
+            //            RoleClaimType = ClaimTypes.Role
+            //        };
+
+            //        options.Events = new JwtBearerEvents
+            //        {
+            //            OnAuthenticationFailed = context =>
+            //            {
+            //                Log.Warning("JWT Authentication failed: {Error}", context.Exception.Message);
+            //                return Task.CompletedTask;
+            //            },
+            //            OnTokenValidated = context =>
+            //            {
+            //                var userName = context.Principal?.Identity?.Name ?? "Unknown";
+            //                Log.Information("JWt Token validated for user: {UserName}", userName);
+            //                return Task.CompletedTask;
+            //            },
+            //            OnChallenge = context =>
+            //            {
+            //                Log.Warning("");
+            //                return Task.CompletedTask;
+            //            }
+            //        };
+            //    });
+
+            //builder.Services.AddAuthorization(options =>
+            //{
+            //    options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+            //        .RequireAuthenticatedUser()
+            //        .Build();
+
+            //    options.AddPolicy("AdminOnly", policy =>
+            //        policy.RequireRole("Admin", "Administrator"));
+
+            //    options.AddPolicy("CanManageJobs", policy =>
+            //        policy.RequireClaim("permissions", "jobs.manage"));
+            //});
 
             // YARP
             builder.Services.AddReverseProxy()
@@ -35,8 +111,9 @@ namespace WebApplication1
             builder.Services.AddHangfire(config =>
             {
                 config.UseSimpleAssemblyNameTypeSerializer()
-                .UseRecommendedSerializerSettings()
-                .UseSqlServerStorage(builder.Configuration.GetConnectionString("sqlHangfire"));
+                    .UseRecommendedSerializerSettings()
+                    .UseSqlServerStorage(builder.Configuration.GetConnectionString("sqlHangfire"))
+                    .UseSerilogLogProvider();
             });
 
             builder.Services.AddHangfireServer();
@@ -57,7 +134,7 @@ namespace WebApplication1
             var app = builder.Build();
 
             //Serilog
-            //app.UseSerilogRequestLogging();
+            app.UseSerilogRequestLogging();
 
             if (app.Environment.IsDevelopment())
             {
@@ -72,7 +149,22 @@ namespace WebApplication1
             app.MapReverseProxy();
             app.MapHangfireDashboard("/hangfire");
 
-            app.Run();
+            try
+            {
+                Log.Information("Starting web application");
+                app.Run();
+            }
+            catch (Exception ex)
+            {
+                Log.Fatal(ex, "Application terminated unexpectedly");
+                return;
+            }
+            finally
+            {
+                Log.CloseAndFlush();
+            }
+
+            //app.Run();
         }
     }
 }
