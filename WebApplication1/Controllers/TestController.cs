@@ -15,23 +15,27 @@ namespace WebApplication1.Controllers
             _cache = cache;
         }
 
-        //[HttpGet("simple-test")]
-        //public ActionResult<string> GetSimple()
-        //{
-        //    return Ok($"Hello {DateTime.Now}");
-        //}
+        // bara FushionCache
 
-        //[HttpGet("cached-test")]
-        //public async Task<ActionResult<string>> GetCached()
-        //{
-        //    var cachedData = await _cache.GetOrSetAsync(
-        //        "test-key",
-        //        async _ => $"Cached data created at {DateTime.Now}",
-        //        TimeSpan.FromMinutes(2)
-        //    );
+        [HttpGet("simple-test")]
+        public ActionResult<string> GetSimple()
+        {
+            return Ok($"Hello {DateTime.Now}");
+        }
 
-        //    return Ok(cachedData);
-        //}
+        [HttpGet("cached-test")]
+        public async Task<ActionResult<string>> GetCached()
+        {
+            var cachedData = await _cache.GetOrSetAsync(
+                "test-key",
+                async _ => $"Cached data created at {DateTime.Now}",
+                TimeSpan.FromMinutes(2)
+            );
+
+            return Ok(cachedData);
+        }
+
+        // FushionCache mot SQLite
 
         [HttpPost("store")]
         public async Task<ActionResult<object>> StoreData([FromQuery] string message = "Test Data")
@@ -85,7 +89,7 @@ namespace WebApplication1.Controllers
                         computedAt = DateTime.Now
                     };
                 },
-                TimeSpan.FromMinutes(5)
+                TimeSpan.FromMinutes(1)
             );
 
             stopwatch.Stop();
@@ -126,7 +130,7 @@ namespace WebApplication1.Controllers
                         timespamp = DateTime.Now
                     };
                 },
-                TimeSpan.FromMinutes(5),
+                TimeSpan.FromMinutes(1),
                 opt => opt.SetFailSafe(true, TimeSpan.FromHours(24))
             );
 
@@ -140,25 +144,137 @@ namespace WebApplication1.Controllers
                 "platina-doc-123",
                 new { title = "Document 123", content = "..." },
                 TimeSpan.FromHours(1),
-                options => options.SetTags("platina", "documents", "legal")
+                tags: new[] {"platina", "documents", "legal" }
             );
 
             await _cache.SetAsync(
                 "platina-doc-456",
                 new { title = "Document 456", content = "..." },
                 TimeSpan.FromHours(1),
-                options => options.SetTags("platina", "documents", "hr")
+                tags: new[] {"platina", "documents", "hr" }
             );
 
             return Ok("Data cached with tags");
         }
 
-        [HttpDelete("delete-platina")]
+        [HttpDelete("invalidate-platina")]
         public async Task<ActionResult> RemovePlatina()
         {
             await _cache.RemoveByTagAsync("platina");
-            return Ok("All platina data removed!");
+            return Ok("All platina data invalidated!");
         }
 
+        [HttpGet("conditional-refresh")]
+        public async Task<ActionResult<object>> ConditionalRefreshTest()
+        {
+            var data = await _cache.GetOrSetAsync<object>(
+                "auto-refresh-data",
+                async _ => new
+                {
+                    data = "Fresh data",
+                    timespamp = DateTime.Now
+                },
+                TimeSpan.FromMinutes(1),
+                options => options
+                    .SetEagerRefresh(0.8f)
+                    .SetFailSafe(true)
+            );
+
+            return Ok(data);
+        }
+
+        [HttpGet("with-jitter")]
+        public async Task<ActionResult<object>> JitterTest()
+        {
+            var data = await _cache.GetOrSetAsync<object>(
+                "jittered-data",
+                async _ => new { timestamp = DateTime.Now },
+                TimeSpan.FromMinutes(5),
+                options => options.SetJittering(TimeSpan.FromSeconds(30))
+            );
+
+            return Ok(data);
+        }
+
+        [HttpGet("advanced-patterns")]
+        public async Task<ActionResult<object>> AdvancedPatterns()
+        {
+            var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+            var data1 = await _cache.GetOrSetAsync<object>(
+                "cancellable-data",
+                async (ctx, ct) =>
+                {
+                    await Task.Delay(1000, ct);
+                    return new { result = "Computed with cancellation support" };
+                },
+
+                TimeSpan.FromMinutes(5),
+                token: cts.Token
+            );
+
+            var data2 = await _cache.GetOrSetAsync<object>(
+                "context-aware-data",
+                async (ctx, ct) =>
+                {
+                    return new
+                    {
+                        key = ctx.Key,
+                        hasStaleValue = ctx.HasStaleValue,
+                        timestamp = DateTime.Now
+                    };
+                },
+                TimeSpan.FromMinutes(5)
+            );
+
+            return Ok(new { data1, data2 });
+        }
+
+        // Extra tester kan va viktiga... Maybe
+
+        [HttpGet("cache-key-patterns")]
+        public async Task<ActionResult<object>> CacheKeyPatterns()
+        {
+            await _cache.SetAsync("platina:documents:all", "doc data", TimeSpan.FromMinutes(30));
+            await _cache.SetAsync("platina:documents:123", "specific data", TimeSpan.FromMinutes(30));
+            await _cache.SetAsync("oktav:documents:456", "person data", TimeSpan.FromMinutes(30));
+            await _cache.SetAsync("centuri:documents:789", "sample data", TimeSpan.FromMinutes(30));
+
+            return Ok("Cache keys follow naming convention: system:type:id");
+        }
+
+        [HttpGet("error-handling")]
+        public async Task<ActionResult<object>> ErrorHandlingTest()
+        {
+            try
+            {
+                var data = await _cache.GetOrSetAsync<object>(
+                    "error-prone-data",
+                    async _ =>
+                    {
+                        if (Random.Shared.Next(1, 5) == 1)
+                            throw new HttpRequestException("Network error");
+
+                        if (Random.Shared.Next(1, 5) == 2)
+                            throw new HttpRequestException("Service timeout");
+
+                        if (Random.Shared.Next(1, 5) == 3)
+                            throw new HttpRequestException("Auth failed");
+
+                        return new { data = "Success!", timestamp = DateTime.Now };
+                    },
+                    TimeSpan.FromMinutes(5),
+                    options => options
+                        .SetFailSafe(true, TimeSpan.FromHours(2))
+                        .SetFactoryTimeouts(TimeSpan.FromMinutes(30))
+                );
+
+                return Ok(data);
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { error = ex.Message, note = "Fail-safe didnt have stale data" });
+            }
+        }
     }
 }
