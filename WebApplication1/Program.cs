@@ -3,12 +3,16 @@ using Hangfire;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity.UI.Services;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using Microsoft.OpenApi.Any;
 using Scalar.AspNetCore;
 using Serilog;
+using System.ComponentModel;
 using System.Security.Claims;
 using WebApplication1.Services;
 using ZiggyCreatures.Caching.Fusion;
 using ZiggyCreatures.Caching.Fusion.Serialization.SystemTextJson;
+using System.Text;
 
 namespace WebApplication1
 {
@@ -29,67 +33,83 @@ namespace WebApplication1
 
             builder.Host.UseSerilog();
 
-            //ADSF Jwt
+            //ADFS Jwt
 
-            //builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-            //    .AddJwtBearer(options =>
-            //    {
-            //        var adsfConfig = builder.Configuration.GetSection("ADSF");
+            builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                .AddJwtBearer(options =>
+                {
+                    if (builder.Environment.IsDevelopment())
+                    {
+                        options.RequireHttpsMetadata = false;
+                        options.TokenValidationParameters = new TokenValidationParameters()
+                        {
+                            ValidateIssuer = true,
+                            ValidIssuer = "test-issuer",
 
-            //        options.Authority = adsfConfig["Authority"];
-            //        options.Audience = adsfConfig["Audience"];
-            //        options.RequireHttpsMetadata = true;
+                            ValidateAudience = true,
+                            ValidAudience = "test-audience",
 
-            //        options.TokenValidationParameters = new TokenValidationParameters
-            //        {
-            //            ValidateIssuer = true,
-            //            ValidIssuer = adsfConfig["Issuer"],
+                            ValidateLifetime = true,
+                            ClockSkew = TimeSpan.FromMinutes(5),
 
-            //            ValidateAudience = true,
-            //            ValidAudience = adsfConfig["Audience"],
+                            ValidateIssuerSigningKey = true,
+                            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("this-is-a-very-long-secret-key-for-testing-jwt-tokens-in-development-only")),
 
-            //            ValidateLifetime = true,
-            //            ClockSkew = TimeSpan.FromMinutes(5),
+                            NameClaimType = ClaimTypes.Name,
+                            RoleClaimType = ClaimTypes.Role,
+                        };
+                    }
+                    else
+                    {
+                        var adfsConfig = builder.Configuration.GetSection("ADFS");
+                        options.Authority = adfsConfig["Authority"];
+                        options.Audience = adfsConfig["Audience"];
+                        options.RequireHttpsMetadata = true;
 
-            //            ValidateIssuerSigningKey = true,
+                        options.TokenValidationParameters = new TokenValidationParameters()
+                        {
+                            ValidateIssuer = true,
+                            ValidateAudience = true,
+                            ValidateLifetime = true,
+                            ClockSkew = TimeSpan.FromMinutes(5),
+                            NameClaimType= ClaimTypes.Name,
+                            RoleClaimType = ClaimTypes.Role
+                        };
+                    }
 
-            //            NameClaimType = ClaimTypes.Name,
-            //            RoleClaimType = ClaimTypes.Role
-            //        };
+                    options.Events = new JwtBearerEvents
+                    {
+                        OnAuthenticationFailed = context =>
+                        {
+                            Log.Warning("");
+                            return Task.CompletedTask;
+                        },
+                        OnTokenValidated = context =>
+                        {
+                            var userName = context.Principal?.Identity?.Name ?? "Unknown";
+                            Log.Information("JWT Token validated for user: {UserName}", userName);
+                            return Task.CompletedTask;
+                        },
+                        OnChallenge = context =>
+                        {
+                            Log.Warning("JWT Challange triggered: {Error} - {ErrorDescription}");
+                            return Task.CompletedTask;
+                        }
+                    };
+                });
 
-            //        options.Events = new JwtBearerEvents
-            //        {
-            //            OnAuthenticationFailed = context =>
-            //            {
-            //                Log.Warning("JWT Authentication failed: {Error}", context.Exception.Message);
-            //                return Task.CompletedTask;
-            //            },
-            //            OnTokenValidated = context =>
-            //            {
-            //                var userName = context.Principal?.Identity?.Name ?? "Unknown";
-            //                Log.Information("JWt Token validated for user: {UserName}", userName);
-            //                return Task.CompletedTask;
-            //            },
-            //            OnChallenge = context =>
-            //            {
-            //                Log.Warning("");
-            //                return Task.CompletedTask;
-            //            }
-            //        };
-            //    });
+            builder.Services.AddAuthorization(options =>
+            {
+                //options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
+                //    .RequireAuthenticatedUser()
+                //    .Build();
 
-            //builder.Services.AddAuthorization(options =>
-            //{
-            //    options.FallbackPolicy = new Microsoft.AspNetCore.Authorization.AuthorizationPolicyBuilder()
-            //        .RequireAuthenticatedUser()
-            //        .Build();
+                options.AddPolicy("AdminOnly", policy =>
+                    policy.RequireRole("Admin", "Administrator"));
 
-            //    options.AddPolicy("AdminOnly", policy =>
-            //        policy.RequireRole("Admin", "Administrator"));
-
-            //    options.AddPolicy("CanManageJobs", policy =>
-            //        policy.RequireClaim("permissions", "jobs.manage"));
-            //});
+                options.AddPolicy("CanManageJobs", policy =>
+                    policy.RequireClaim("permissions", "jobs.manage"));
+            });
 
             // YARP
             builder.Services.AddReverseProxy()
@@ -129,7 +149,45 @@ namespace WebApplication1
                 .AsHybridCache();
 
             builder.Services.AddControllers();
-            builder.Services.AddOpenApi();
+            builder.Services.AddOpenApi(options =>
+            {
+                options.AddDocumentTransformer((document, context, cancellationToken) =>
+                {
+                    if (document.Components == null)
+                        document.Components = new OpenApiComponents();
+
+                    if (document.Components.SecuritySchemes == null)
+                        document.Components.SecuritySchemes = new Dictionary<string, OpenApiSecurityScheme>();
+
+                    document.Components.SecuritySchemes.Add("Bearer", new OpenApiSecurityScheme
+                    {
+                        Type = SecuritySchemeType.Http,
+                        Scheme = "bearer",
+                        BearerFormat = "JWT",
+                        Description = "Enter your JWT token"
+                    });
+
+                    document.SecurityRequirements = new List<OpenApiSecurityRequirement>
+                    {
+                        new OpenApiSecurityRequirement
+                        {
+                            {
+                                new OpenApiSecurityScheme
+                                {
+                                    Reference = new OpenApiReference
+                                    {
+                                        Type = ReferenceType.SecurityScheme,
+                                        Id = "Bearer"
+                                    }
+                                },
+                                Array.Empty<string>()
+                            }
+                        }
+                    };
+
+                    return Task.CompletedTask;
+                });
+            });
 
             var app = builder.Build();
 
@@ -143,6 +201,7 @@ namespace WebApplication1
             }
 
             app.UseHttpsRedirection();
+            app.UseAuthentication();
             app.UseAuthorization();      
             app.MapControllers();
             
