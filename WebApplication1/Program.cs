@@ -13,6 +13,7 @@ using WebApplication1.Services;
 using ZiggyCreatures.Caching.Fusion;
 using ZiggyCreatures.Caching.Fusion.Serialization.SystemTextJson;
 using System.Text;
+using NeoSmart.Caching.Sqlite;
 
 namespace WebApplication1
 {
@@ -115,18 +116,6 @@ namespace WebApplication1
             builder.Services.AddReverseProxy()
                 .LoadFromConfig(builder.Configuration.GetSection("ReverseProxy"));
 
-            // SQLite
-            builder.Services.AddEasyCaching(opt =>
-            {
-                opt.UseSQLite(config =>
-                {
-                    config.DBConfig = new EasyCaching.SQLite.SQLiteDBOptions
-                    {
-                        FileName = "cache.db",
-                    };
-                }, "slqlite");
-            });
-
             // Hangfire
             builder.Services.AddHangfire(config =>
             {
@@ -144,7 +133,13 @@ namespace WebApplication1
             builder.Services.AddDistributedMemoryCache();
 
             builder.Services.AddFusionCache()
-                .WithDefaultEntryOptions(opt => opt.Duration = TimeSpan.FromMinutes(5))
+                .WithDefaultEntryOptions(options =>
+                {
+                    options.Duration = TimeSpan.FromMinutes(5);
+                    options.IsFailSafeEnabled = true;
+                    options.FailSafeMaxDuration = TimeSpan.FromHours(1);
+                    options.FailSafeThrottleDuration = TimeSpan.FromMinutes(1);
+                })
                 .WithSerializer(new FusionCacheSystemTextJsonSerializer())
                 .AsHybridCache();
 
@@ -189,6 +184,9 @@ namespace WebApplication1
                 });
             });
 
+            // Healthchecks, Kolla in det senare
+            builder.Services.AddHealthChecks();
+
             var app = builder.Build();
 
             //Serilog
@@ -198,7 +196,7 @@ namespace WebApplication1
             {
                 app.MapOpenApi();
                 app.MapScalarApiReference();
-            }
+            }        
 
             app.UseHttpsRedirection();
             app.UseAuthentication();
@@ -206,7 +204,7 @@ namespace WebApplication1
             app.MapControllers();
             
             app.MapReverseProxy();
-            app.MapHangfireDashboard("/hangfire");
+            app.MapHangfireDashboard("/hangfire"); // Hangfire dashboard
 
             try
             {

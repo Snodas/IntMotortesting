@@ -8,15 +8,16 @@
 
   <ItemGroup>
     <PackageReference Include="AutoMapper" Version="15.0.1" />
-    <PackageReference Include="EasyCaching.SQLite" Version="1.9.2" />
     <PackageReference Include="Hangfire" Version="1.8.21" />
     <PackageReference Include="Hangfire.Console.Extensions.Serilog" Version="2.0.0" />
     <PackageReference Include="Hangfire.Storage.SQLite" Version="0.4.2" />
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="9.0.9" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.9" />
+    <PackageReference Include="NeoSmart.Caching.Sqlite" Version="9.0.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Polly.Core" Version="8.6.3" />
     <PackageReference Include="Polly.Extensions" Version="8.6.3" />
-    <PackageReference Include="Scalar.AspNetCore" Version="2.8.0" />
+    <PackageReference Include="Scalar.AspNetCore" Version="2.8.1" />
     <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageReference Include="System.Data.SqlClient" Version="4.9.0" />
